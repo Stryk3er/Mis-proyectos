@@ -71,7 +71,7 @@ def guardar_evento(timestamp, event_id, descripcion, usuario, computador, nivel,
  
 # ── Recolección de logs ───────────────────────────────────────────────────────
 def recolectar_logs_windows(max_eventos=100):
-    """Lee los últimos eventos del Security Event Log de Windows."""
+    """Lee los últimos eventos del Security Event Log de Windows en lotes pequeños."""
     if not WINDOWS_AVAILABLE:
         print("[-] pywin32 no instalado. Corriendo en modo simulación.")
         return False
@@ -80,23 +80,29 @@ def recolectar_logs_windows(max_eventos=100):
     try:
         hand = win32evtlog.OpenEventLog(None, "Security")
         flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        eventos = win32evtlog.ReadEventLog(hand, flags, 0)
  
         conteo = 0
-        for evento in eventos:
-            if conteo >= max_eventos:
-                break
-            event_id = evento.EventID & 0xFFFF
-            if event_id in EVENTOS_CRITICOS:
-                timestamp = evento.TimeGenerated.Format()
-                usuario = evento.StringInserts[0] if evento.StringInserts else "N/A"
-                computador = evento.ComputerName
-                nivel = "CRITICO" if event_id in [4625, 4740, 7045] else "INFO"
-                descripcion = EVENTOS_CRITICOS.get(event_id, "Evento desconocido")
+        # FIX: leer en lotes para evitar saturar la memoria RAM
+        while conteo < max_eventos:
+            lote = win32evtlog.ReadEventLog(hand, flags, 0)
+            if not lote:
+                break  # No hay más eventos
  
-                guardar_evento(timestamp, event_id, descripcion, usuario, computador, nivel)
-                print(f"  [{nivel}] {timestamp} | EventID {event_id} | {descripcion} | Usuario: {usuario}")
-                conteo += 1
+            for evento in lote:
+                if conteo >= max_eventos:
+                    break
+ 
+                event_id = evento.EventID & 0xFFFF
+                if event_id in EVENTOS_CRITICOS:
+                    timestamp = evento.TimeGenerated.Format()
+                    usuario = evento.StringInserts[0] if evento.StringInserts else "N/A"
+                    computador = evento.ComputerName
+                    nivel = "CRITICO" if event_id in [4625, 4740, 7045] else "INFO"
+                    descripcion = EVENTOS_CRITICOS.get(event_id, "Evento desconocido")
+ 
+                    guardar_evento(timestamp, event_id, descripcion, usuario, computador, nivel)
+                    print(f"  [{nivel}] {timestamp} | EventID {event_id} | {descripcion} | Usuario: {usuario}")
+                    conteo += 1
  
         win32evtlog.CloseEventLog(hand)
         print(f"[+] {conteo} eventos recolectados y guardados.")
@@ -111,16 +117,16 @@ def simular_eventos():
     """Genera eventos de prueba para desarrollo/demo."""
     print("[*] Generando eventos simulados para demo...")
     eventos_demo = [
-        ("2026-06-03 08:01:00", 4624, "Login exitoso",                 "julian.eduardo",  "LAPTOP-DEACERO", "INFO"),
-        ("2026-06-03 08:15:00", 4625, "Login fallido",                  "admin",           "LAPTOP-DEACERO", "CRITICO"),
-        ("2026-06-03 08:15:10", 4625, "Login fallido",                  "admin",           "LAPTOP-DEACERO", "CRITICO"),
-        ("2026-06-03 08:15:20", 4625, "Login fallido",                  "admin",           "LAPTOP-DEACERO", "CRITICO"),
-        ("2026-06-03 08:16:00", 4740, "Cuenta bloqueada",               "admin",           "LAPTOP-DEACERO", "CRITICO"),
-        ("2026-06-03 09:00:00", 4672, "Privilegios especiales asignados","julian.eduardo", "LAPTOP-DEACERO", "INFO"),
-        ("2026-06-03 09:30:00", 4688, "Nuevo proceso creado",           "SYSTEM",          "LAPTOP-DEACERO", "INFO"),
-        ("2026-06-03 10:00:00", 4720, "Cuenta de usuario creada",       "julian.eduardo",  "LAPTOP-DEACERO", "INFO"),
-        ("2026-06-03 11:00:00", 7045, "Nuevo servicio instalado",       "SYSTEM",          "LAPTOP-DEACERO", "CRITICO"),
-        ("2026-06-03 11:30:00", 4648, "Login con credenciales explícitas","julian.eduardo","LAPTOP-DEACERO", "INFO"),
+        ("2026-06-03 08:01:00", 4624, "Login exitoso",                  "julian.eduardo",  "LAPTOP-DEACERO", "INFO"),
+        ("2026-06-03 08:15:00", 4625, "Login fallido",                   "admin",           "LAPTOP-DEACERO", "CRITICO"),
+        ("2026-06-03 08:15:10", 4625, "Login fallido",                   "admin",           "LAPTOP-DEACERO", "CRITICO"),
+        ("2026-06-03 08:15:20", 4625, "Login fallido",                   "admin",           "LAPTOP-DEACERO", "CRITICO"),
+        ("2026-06-03 08:16:00", 4740, "Cuenta bloqueada",                "admin",           "LAPTOP-DEACERO", "CRITICO"),
+        ("2026-06-03 09:00:00", 4672, "Privilegios especiales asignados","julian.eduardo",  "LAPTOP-DEACERO", "INFO"),
+        ("2026-06-03 09:30:00", 4688, "Nuevo proceso creado",            "SYSTEM",          "LAPTOP-DEACERO", "INFO"),
+        ("2026-06-03 10:00:00", 4720, "Cuenta de usuario creada",        "julian.eduardo",  "LAPTOP-DEACERO", "INFO"),
+        ("2026-06-03 11:00:00", 7045, "Nuevo servicio instalado",        "SYSTEM",          "LAPTOP-DEACERO", "CRITICO"),
+        ("2026-06-03 11:30:00", 4648, "Login con credenciales explícitas","julian.eduardo", "LAPTOP-DEACERO", "INFO"),
     ]
     for ev in eventos_demo:
         guardar_evento(*ev)
