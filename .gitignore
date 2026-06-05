@@ -1,1 +1,14 @@
 siem_eventos.db
+
+# Variables de entorno — NUNCA subir
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Entorno virtual
+.venv/
+venv/
+env/
