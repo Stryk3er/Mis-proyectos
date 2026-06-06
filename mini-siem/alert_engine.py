@@ -3,12 +3,32 @@ Mini-SIEM - Módulo 2: Motor de Alertas
 Autor: Julian Eduardo
 Descripción: Analiza eventos recolectados y detecta patrones sospechosos,
              generando alertas con nivel de severidad.
+             Soporta configuración de umbrales y whitelist de usuarios.
 """
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 
 DB_PATH = "siem_eventos.db"
+
+# ── Configuración de umbrales (ajustable sin tocar el código) ─────────────────
+CONFIG = {
+    # Fuerza bruta: número de fallos y ventana de tiempo
+    "fuerza_bruta_umbral": 5,          # intentos fallidos para disparar alerta
+    "fuerza_bruta_ventana_min": 5,     # ventana de tiempo en minutos
+    "fuerza_bruta_severidad_baja": 3,  # fallos para alerta MEDIA (usuario olvidadizo)
+
+    # Horario laboral (fuera de este rango = sospechoso)
+    "hora_inicio_laboral": 7,
+    "hora_fin_laboral": 22,
+
+    # Whitelist: usuarios que NUNCA generan alerta de fuerza bruta
+    # (ej. cuentas de servicio o usuarios con historial de olvidos frecuentes)
+    "whitelist_usuarios": [
+        "SYSTEM",
+        "S-1-5-18",
+    ],
+}
 
 # ── Base de datos ─────────────────────────────────────────────────────────────
 def inicializar_tabla_alertas():
@@ -51,45 +71,72 @@ def obtener_eventos():
     conn.close()
     return eventos
 
+def parsear_timestamp(timestamp):
+    """Intenta parsear el timestamp en múltiples formatos."""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%c"):
+        try:
+            return datetime.strptime(timestamp, fmt)
+        except ValueError:
+            continue
+    return None
+
 # ── Reglas de detección ───────────────────────────────────────────────────────
-def detectar_fuerza_bruta(eventos, umbral=3, ventana_minutos=1):
+def detectar_fuerza_bruta(eventos):
     """
-    Detecta múltiples logins fallidos (4625) del mismo usuario
-    en una ventana de tiempo corta.
+    Detecta múltiples logins fallidos (4625) del mismo usuario.
+
+    - Si supera fuerza_bruta_umbral en la ventana → alerta ALTA
+    - Si supera fuerza_bruta_severidad_baja pero no el umbral alto → alerta MEDIA
+      (posible usuario olvidadizo, requiere revisión humana antes de actuar)
+    - Usuarios en whitelist son ignorados
     """
-    alertas = []
-    fallidos = {}  # {usuario: [timestamps]}
+    umbral_alto  = CONFIG["fuerza_bruta_umbral"]
+    umbral_bajo  = CONFIG["fuerza_bruta_severidad_baja"]
+    ventana_min  = CONFIG["fuerza_bruta_ventana_min"]
+    whitelist    = CONFIG["whitelist_usuarios"]
+
+    alertas  = []
+    fallidos = {}  # {usuario: [(ts, computador)]}
 
     for ev in eventos:
         timestamp, event_id, _, usuario, computador, _ = ev
         if event_id != 4625:
             continue
+        if usuario in whitelist:
+            continue
 
-        try:
-            ts = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            # Formato alternativo del Event Log real de Windows
-            try:
-                ts = datetime.strptime(timestamp, "%c")
-            except ValueError:
-                continue
+        ts = parsear_timestamp(timestamp)
+        if ts is None:
+            continue
 
-        if usuario not in fallidos:
-            fallidos[usuario] = []
-        fallidos[usuario].append((ts, computador))
+        fallidos.setdefault(usuario, []).append((ts, computador))
 
     for usuario, intentos in fallidos.items():
         intentos.sort()
-        for i in range(len(intentos) - umbral + 1):
+
+        # Buscar ventana con umbral alto (ALTA)
+        alerta_generada = False
+        for i in range(len(intentos) - umbral_alto + 1):
             t_inicio = intentos[i][0]
-            t_fin = intentos[i + umbral - 1][0]
-            if (t_fin - t_inicio).total_seconds() <= ventana_minutos * 60:
-                computador = intentos[i][1]
-                detalle = (f"{umbral} logins fallidos en "
-                           f"{(t_fin - t_inicio).total_seconds():.0f}s "
-                           f"entre {t_inicio} y {t_fin}")
-                alertas.append(("FUERZA BRUTA", "ALTA", usuario, computador, detalle))
-                break  # Una alerta por usuario es suficiente
+            t_fin    = intentos[i + umbral_alto - 1][0]
+            if (t_fin - t_inicio).total_seconds() <= ventana_min * 60:
+                detalle = (f"{umbral_alto} logins fallidos en "
+                           f"{(t_fin - t_inicio).total_seconds():.0f}s — "
+                           f"posible ataque automatizado")
+                alertas.append(("FUERZA BRUTA", "ALTA", usuario, intentos[i][1], detalle))
+                alerta_generada = True
+                break
+
+        # Si no llegó al umbral alto pero sí al bajo → alerta MEDIA (usuario olvidadizo)
+        if not alerta_generada and len(intentos) >= umbral_bajo:
+            for i in range(len(intentos) - umbral_bajo + 1):
+                t_inicio = intentos[i][0]
+                t_fin    = intentos[i + umbral_bajo - 1][0]
+                if (t_fin - t_inicio).total_seconds() <= ventana_min * 60:
+                    detalle = (f"{len(intentos)} logins fallidos detectados — "
+                               f"puede ser usuario olvidadizo, revisar antes de actuar")
+                    alertas.append(("POSIBLE USUARIO OLVIDADIZO", "MEDIA", usuario, intentos[i][1], detalle))
+                    break
 
     return alertas
 
@@ -102,6 +149,8 @@ def detectar_bloqueo_tras_fuerza_bruta(eventos):
 
     for ev in eventos:
         _, event_id, _, usuario, computador, _ = ev
+        if usuario in CONFIG["whitelist_usuarios"]:
+            continue
         if event_id == 4625:
             usuarios_con_fallos.add(usuario)
         elif event_id == 4740 and usuario in usuarios_con_fallos:
@@ -123,27 +172,28 @@ def detectar_servicio_nuevo(eventos):
             alertas.append(("SERVICIO NUEVO INSTALADO", "CRITICA", usuario, computador, detalle))
     return alertas
 
-def detectar_privilegios_fuera_horario(eventos, hora_inicio=22, hora_fin=6):
+def detectar_privilegios_fuera_horario(eventos):
     """
     Detecta privilegios especiales (4672) asignados fuera del horario laboral.
     """
-    alertas = []
+    hora_inicio = CONFIG["hora_inicio_laboral"]
+    hora_fin    = CONFIG["hora_fin_laboral"]
+    alertas     = []
+
     for ev in eventos:
         timestamp, event_id, _, usuario, computador, _ = ev
         if event_id != 4672:
             continue
+        if usuario in CONFIG["whitelist_usuarios"]:
+            continue
 
-        try:
-            ts = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            try:
-                ts = datetime.strptime(timestamp, "%c")
-            except ValueError:
-                continue
+        ts = parsear_timestamp(timestamp)
+        if ts is None:
+            continue
 
         hora = ts.hour
-        if hora >= hora_inicio or hora < hora_fin:
-            detalle = f"Privilegios elevados asignados a las {ts.strftime('%H:%M')} (fuera de horario)"
+        if hora < hora_inicio or hora >= hora_fin:
+            detalle = f"Privilegios elevados asignados a las {ts.strftime('%H:%M')} (fuera de horario laboral)"
             alertas.append(("PRIVILEGIOS FUERA DE HORARIO", "MEDIA", usuario, computador, detalle))
 
     return alertas
@@ -151,7 +201,12 @@ def detectar_privilegios_fuera_horario(eventos, hora_inicio=22, hora_fin=6):
 # ── Motor principal ───────────────────────────────────────────────────────────
 def correr_motor():
     """Ejecuta todas las reglas de detección y guarda las alertas."""
-    print("\n🔍 Mini-SIEM - Motor de Alertas v1.0")
+    print("\n🔍 Mini-SIEM - Motor de Alertas v2.0")
+    print("=" * 50)
+    print(f"  Umbral fuerza bruta:  {CONFIG['fuerza_bruta_umbral']} fallos / {CONFIG['fuerza_bruta_ventana_min']} min")
+    print(f"  Umbral usuario olvid: {CONFIG['fuerza_bruta_severidad_baja']} fallos (alerta MEDIA)")
+    print(f"  Horario laboral:      {CONFIG['hora_inicio_laboral']}:00 - {CONFIG['hora_fin_laboral']}:00")
+    print(f"  Whitelist:            {', '.join(CONFIG['whitelist_usuarios'])}")
     print("=" * 50)
 
     inicializar_tabla_alertas()
