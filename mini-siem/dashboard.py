@@ -57,6 +57,21 @@ def get_eventos():
     conn.close()
     return rows
 
+def get_top_ips():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT ip_origen, COUNT(*) as total FROM eventos
+            WHERE ip_origen NOT IN ('Local', 'N/A')
+            GROUP BY ip_origen ORDER BY total DESC LIMIT 10
+        """)
+        rows = [{"ip": r[0], "total": r[1]} for r in cursor.fetchall()]
+    except Exception:
+        rows = []
+    conn.close()
+    return rows
+
 # ── HTML del dashboard ────────────────────────────────────────────────────────
 TEMPLATE = """
 <!DOCTYPE html>
@@ -220,11 +235,27 @@ TEMPLATE = """
           <th>Descripción</th>
           <th>Usuario</th>
           <th>Equipo</th>
+          <th>IP Origen</th>
           <th>Nivel</th>
         </tr>
       </thead>
       <tbody id="tabla-eventos">
-        <tr><td colspan="6" class="empty">Cargando...</td></tr>
+        <tr><td colspan="7" class="empty">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>🌐 Top IPs de Origen</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>IP</th>
+          <th>Ocurrencias</th>
+        </tr>
+      </thead>
+      <tbody id="tabla-ips">
+        <tr><td colspan="2" class="empty">Cargando...</td></tr>
       </tbody>
     </table>
   </div>
@@ -281,7 +312,23 @@ TEMPLATE = """
             <td>${r.descripcion}</td>
             <td>${r.usuario}</td>
             <td>${r.computador}</td>
+            <td>${r.ip_origen || 'Local'}</td>
             <td>${badge(r.nivel)}</td>
+          </tr>`).join('');
+      });
+
+    fetch('/api/top_ips')
+      .then(r => r.json())
+      .then(rows => {
+        const tbody = document.getElementById('tabla-ips');
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="2" class="empty">Sin IPs externas registradas.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.ip}</td>
+            <td>${r.total}</td>
           </tr>`).join('');
       });
 
@@ -314,6 +361,10 @@ def api_alertas():
 @app.route("/api/eventos")
 def api_eventos():
     return jsonify(get_eventos())
+
+@app.route("/api/top_ips")
+def api_top_ips():
+    return jsonify(get_top_ips())
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

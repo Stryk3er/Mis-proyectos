@@ -66,7 +66,11 @@ def obtener_eventos():
     """Recupera todos los eventos de la base de datos."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT timestamp, event_id, descripcion, usuario, computador, nivel FROM eventos ORDER BY timestamp")
+    # Incluye ip_origen; si la columna no existe usa 'N/A'
+    try:
+        cursor.execute("SELECT timestamp, event_id, descripcion, usuario, computador, nivel, ip_origen FROM eventos ORDER BY timestamp")
+    except Exception:
+        cursor.execute("SELECT timestamp, event_id, descripcion, usuario, computador, nivel, 'N/A' FROM eventos ORDER BY timestamp")
     eventos = cursor.fetchall()
     conn.close()
     return eventos
@@ -99,7 +103,7 @@ def detectar_fuerza_bruta(eventos):
     fallidos = {}  # {usuario: [(ts, computador)]}
 
     for ev in eventos:
-        timestamp, event_id, _, usuario, computador, _ = ev
+        timestamp, event_id, _, usuario, computador, _, ip = ev
         if event_id != 4625:
             continue
         if usuario in whitelist:
@@ -109,7 +113,7 @@ def detectar_fuerza_bruta(eventos):
         if ts is None:
             continue
 
-        fallidos.setdefault(usuario, []).append((ts, computador))
+        fallidos.setdefault(usuario, []).append((ts, computador, ip))
 
     for usuario, intentos in fallidos.items():
         intentos.sort()
@@ -120,9 +124,10 @@ def detectar_fuerza_bruta(eventos):
             t_inicio = intentos[i][0]
             t_fin    = intentos[i + umbral_alto - 1][0]
             if (t_fin - t_inicio).total_seconds() <= ventana_min * 60:
+                ip = intentos[i][2] or "N/A"
                 detalle = (f"{umbral_alto} logins fallidos en "
                            f"{(t_fin - t_inicio).total_seconds():.0f}s — "
-                           f"posible ataque automatizado")
+                           f"posible ataque automatizado | IP: {ip}")
                 alertas.append(("FUERZA BRUTA", "ALTA", usuario, intentos[i][1], detalle))
                 alerta_generada = True
                 break
@@ -133,8 +138,9 @@ def detectar_fuerza_bruta(eventos):
                 t_inicio = intentos[i][0]
                 t_fin    = intentos[i + umbral_bajo - 1][0]
                 if (t_fin - t_inicio).total_seconds() <= ventana_min * 60:
+                    ip = intentos[i][2] or "N/A"
                     detalle = (f"{len(intentos)} logins fallidos detectados — "
-                               f"puede ser usuario olvidadizo, revisar antes de actuar")
+                               f"puede ser usuario olvidadizo, revisar antes de actuar | IP: {ip}")
                     alertas.append(("POSIBLE USUARIO OLVIDADIZO", "MEDIA", usuario, intentos[i][1], detalle))
                     break
 
@@ -145,16 +151,17 @@ def detectar_bloqueo_tras_fuerza_bruta(eventos):
     Detecta cuenta bloqueada (4740) precedida de logins fallidos (4625).
     """
     alertas = []
-    usuarios_con_fallos = set()
+    usuarios_con_fallos = {}  # {usuario: ip}
 
     for ev in eventos:
-        _, event_id, _, usuario, computador, _ = ev
+        _, event_id, _, usuario, computador, _, ip = ev
         if usuario in CONFIG["whitelist_usuarios"]:
             continue
         if event_id == 4625:
-            usuarios_con_fallos.add(usuario)
+            usuarios_con_fallos[usuario] = ip
         elif event_id == 4740 and usuario in usuarios_con_fallos:
-            detalle = f"Cuenta bloqueada tras múltiples logins fallidos en {computador}"
+            ip_origen = usuarios_con_fallos[usuario] or "N/A"
+            detalle = f"Cuenta bloqueada tras múltiples logins fallidos en {computador} | IP: {ip_origen}"
             alertas.append(("CUENTA BLOQUEADA POST ATAQUE", "CRITICA", usuario, computador, detalle))
 
     return alertas
@@ -166,7 +173,7 @@ def detectar_servicio_nuevo(eventos):
     """
     alertas = []
     for ev in eventos:
-        timestamp, event_id, _, usuario, computador, _ = ev
+        timestamp, event_id, _, usuario, computador, _, ip = ev
         if event_id == 7045:
             detalle = f"Nuevo servicio instalado a las {timestamp} por {usuario}"
             alertas.append(("SERVICIO NUEVO INSTALADO", "CRITICA", usuario, computador, detalle))
@@ -181,7 +188,7 @@ def detectar_privilegios_fuera_horario(eventos):
     alertas     = []
 
     for ev in eventos:
-        timestamp, event_id, _, usuario, computador, _ = ev
+        timestamp, event_id, _, usuario, computador, _, ip = ev
         if event_id != 4672:
             continue
         if usuario in CONFIG["whitelist_usuarios"]:
