@@ -57,6 +57,38 @@ def get_eventos():
     conn.close()
     return rows
 
+def get_eventos_por_hora():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT substr(timestamp, 12, 2) as hora, COUNT(*) as total
+            FROM eventos
+            WHERE timestamp LIKE '____-__-__ %'
+            GROUP BY hora ORDER BY hora
+        """)
+        datos = {str(r[0]).zfill(2): r[1] for r in cursor.fetchall()}
+    except Exception:
+        datos = {}
+    conn.close()
+    horas  = [f"{str(h).zfill(2)}:00" for h in range(24)]
+    totales = [datos.get(str(h).zfill(2), 0) for h in range(24)]
+    return {"horas": horas, "totales": totales}
+
+def get_eventos_por_tipo():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT descripcion, COUNT(*) as total
+            FROM eventos GROUP BY descripcion ORDER BY total DESC LIMIT 6
+        """)
+        rows = cursor.fetchall()
+    except Exception:
+        rows = []
+    conn.close()
+    return {"labels": [r[0] for r in rows], "totales": [r[1] for r in rows]}
+
 def get_top_ips():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -163,6 +195,28 @@ TEMPLATE = """
 
     .empty { color: #8b949e; font-style: italic; padding: 16px; text-align: center; }
 
+    /* Gráficas */
+    .charts {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .chart-box {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .chart-box h3 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #8b949e;
+      margin-bottom: 12px;
+    }
+    .chart-box canvas { width: 100% !important; }
+
     /* Barra de estado */
     .status-bar {
       position: fixed; bottom: 0; left: 0; right: 0;
@@ -203,6 +257,17 @@ TEMPLATE = """
     <div class="card red">
       <div class="number" id="alertas-criticas">--</div>
       <div class="label">Alertas Críticas</div>
+    </div>
+  </div>
+
+  <div class="charts">
+    <div class="chart-box">
+      <h3>📊 Eventos por hora del día</h3>
+      <canvas id="chartHoras" height="120"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>🥧 Top tipos de evento</h3>
+      <canvas id="chartTipos" height="120"></canvas>
     </div>
   </div>
 
@@ -267,7 +332,70 @@ TEMPLATE = """
   <span id="status-time"></span>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
+  Chart.defaults.color = '#8b949e';
+  Chart.defaults.borderColor = '#21262d';
+
+  let chartHoras = null;
+  let chartTipos = null;
+
+  function iniciarGraficas() {
+    fetch('/api/chart_horas')
+      .then(r => r.json())
+      .then(d => {
+        const ctx = document.getElementById('chartHoras').getContext('2d');
+        if (chartHoras) chartHoras.destroy();
+        chartHoras = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: d.horas,
+            datasets: [{
+              label: 'Eventos',
+              data: d.totales,
+              backgroundColor: '#1f6feb',
+              borderColor: '#58a6ff',
+              borderWidth: 1,
+              borderRadius: 3,
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { color: '#21262d' }, ticks: { maxTicksLimit: 12 } },
+              y: { grid: { color: '#21262d' }, beginAtZero: true }
+            }
+          }
+        });
+      });
+
+    fetch('/api/chart_tipos')
+      .then(r => r.json())
+      .then(d => {
+        const ctx = document.getElementById('chartTipos').getContext('2d');
+        if (chartTipos) chartTipos.destroy();
+        chartTipos = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: d.labels,
+            datasets: [{
+              data: d.totales,
+              backgroundColor: ['#58a6ff','#f85149','#f0883e','#e3b341','#3fb950','#bc8cff'],
+              borderColor: '#0d1117',
+              borderWidth: 2,
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } }
+            }
+          }
+        });
+      });
+  }
+
   function badge(val) {
     return `<span class="badge ${val}">${val}</span>`;
   }
@@ -337,8 +465,9 @@ TEMPLATE = """
     document.getElementById('status-time').textContent = now;
   }
 
+  iniciarGraficas();
   cargarDatos();
-  setInterval(cargarDatos, 30000); // Actualiza cada 30 segundos
+  setInterval(() => { iniciarGraficas(); cargarDatos(); }, 30000);
 </script>
 
 </body>
@@ -365,6 +494,14 @@ def api_eventos():
 @app.route("/api/top_ips")
 def api_top_ips():
     return jsonify(get_top_ips())
+
+@app.route("/api/chart_horas")
+def api_chart_horas():
+    return jsonify(get_eventos_por_hora())
+
+@app.route("/api/chart_tipos")
+def api_chart_tipos():
+    return jsonify(get_eventos_por_tipo())
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
