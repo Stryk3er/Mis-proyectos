@@ -37,10 +37,15 @@
     .brand-name em{font-style:normal;background:linear-gradient(90deg,var(--ind),var(--cyn));
       -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
     .nav-r{display:flex;align-items:center;gap:9px}
-    .model-sel{background:var(--bg2);border:1px solid var(--bd);color:var(--txt2);padding:6px 9px;
-      border-radius:8px;font-size:12px;cursor:pointer;outline:none}
+    .model-info{display:flex;gap:6px}
+    .model-badge{font-size:11px;font-weight:500;padding:5px 10px;border-radius:20px;
+      background:var(--bg3);border:1px solid var(--bd);color:var(--txt2);white-space:nowrap}
+    .model-badge.secondary{color:var(--txt3);border-color:rgba(99,102,241,.08)}
     .status-chip{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;
       font-size:11px;font-weight:500;background:var(--bg3);border:1px solid var(--bd);color:var(--txt2)}
+    .cost-chip{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;
+      font-size:11px;font-weight:600;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);
+      color:var(--grn);white-space:nowrap;font-family:'JetBrains Mono',monospace}
     .dot{width:7px;height:7px;border-radius:50%;background:var(--txt3);transition:all .3s}
     .dot.ok{background:var(--grn);box-shadow:0 0 7px var(--grn)}
     .dot.warn{background:var(--amb)}
@@ -222,11 +227,14 @@
     <span class="brand-name">Data<em>Mind AI</em></span>
   </div>
   <div class="nav-r">
-    <select class="model-sel" id="mdl">
-      <option value="claude-haiku-4-5-20251001">Haiku 4.5 — rápido</option>
-      <option value="claude-sonnet-4-6" selected>Sonnet 4.6 — recomendado</option>
-    </select>
+    <div class="model-info">
+      <span class="model-badge">🔍 Análisis: Sonnet 4.6</span>
+      <span class="model-badge secondary">💬 Chat: Haiku 4.5</span>
+    </div>
     <div class="status-chip"><div class="dot" id="dot"></div><span id="stxt">Verificando...</span></div>
+    <div class="cost-chip" id="costChip" style="display:none">
+      <span>💰</span><span id="costVal">$0.0000</span>
+    </div>
   </div>
 </nav>
 
@@ -435,7 +443,7 @@ async function runAnalysis(){
   try{
     const ctx=prepareContext();
     const prompt=`Eres un analista de datos senior. Analiza el siguiente dataset y responde ÚNICAMENTE con JSON válido sin texto adicional.\n\n${ctx}\nArchivo: ${S.fileName} | Columnas: ${S.headers.join(', ')}\n\nJSON:\n{"summary":"resumen ejecutivo 2-3 oraciones","keyMetrics":[{"label":"nombre","value":"valor+unidad","description":"qué representa"}],"trends":[{"icon":"emoji","text":"patrón con datos"}],"anomalies":[{"text":"anomalía con contexto"}],"recommendations":["recomendación ejecutiva accionable"],"chartConfig":{"type":"line","labels":["l1","l2"],"datasets":[{"label":"serie","data":[n1,n2]}]}}\n\nReglas: 4-6 métricas con valores reales, 3-5 tendencias, 1-4 anomalías solo si existen, 3 recomendaciones por impacto. chartConfig con datos reales. Todo en español.`;
-    const resp=await callAPI(prompt);
+    const resp=await callAnalyzeAPI(prompt);
     const match=resp.match(/\{[\s\S]*\}/);if(!match)throw new Error('Respuesta sin JSON válido');
     const json=JSON.parse(match[0]);
     S.analysisCache={...json,_meta:{file:S.fileName,rows:S.data.length,ts:new Date().toISOString()}};
@@ -501,7 +509,7 @@ async function sendMsg(){
   try{
     const ctx=prepareContext();
     const aCtx=S.analysisCache?`\n\nAnálisis previo: ${JSON.stringify({summary:S.analysisCache.summary,keyMetrics:S.analysisCache.keyMetrics})}`:'';
-    const ans=await callAPI(`Eres un analista de datos senior. Dataset:\n\n${ctx}${aCtx}\n\nResponde de forma clara y ejecutiva con cifras reales. Máximo 3 párrafos. En español.\n\nPregunta: ${q}`);
+    const ans=await callChatAPI(`Eres un analista de datos senior. Dataset:\n\n${ctx}${aCtx}\n\nResponde de forma clara y ejecutiva con cifras reales. Máximo 3 párrafos. En español.\n\nPregunta: ${q}`);
     removeTyping(tid);addMsg('a',ans);
   }catch(err){removeTyping(tid);addMsg('a',`⚠️ ${err.message}`);}
   finally{S.chatting=false;document.getElementById('sBtn').disabled=false;}
@@ -521,14 +529,41 @@ function removeTyping(id){const e=document.getElementById(id);if(e)e.remove();}
 function hKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}}
 function aH(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,100)+'px';}
 
-// Llama al backend propio — sin API key en el cliente
-async function callAPI(prompt){
+// Análisis profundo → Sonnet (con caché en servidor)
+async function callAnalyzeAPI(prompt){
   const res=await fetch('/api/analyze',{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({prompt,model:document.getElementById('mdl').value})
+    body:JSON.stringify({prompt})
   });
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||`HTTP ${res.status}`);}
+  const data=await res.json();
+  // Mostrar indicador de caché y costo acumulado
+  if(data.fromCache) toast('⚡ Resultado desde caché — $0.0000','i');
+  updateCostDisplay();
+  return data.content;
+}
+
+// Chat → Haiku (20x más barato)
+async function callChatAPI(prompt){
+  const res=await fetch('/api/chat',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt})
+  });
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||`HTTP ${res.status}`);}
+  updateCostDisplay();
   return(await res.json()).content;
+}
+
+// Actualiza el chip de costo consultando /api/health
+async function updateCostDisplay(){
+  try{
+    const r=await fetch('/api/health');
+    const d=await r.json();
+    const cost=d.usage?.estimatedCostUSD??0;
+    const chip=document.getElementById('costChip');
+    chip.style.display='flex';
+    document.getElementById('costVal').textContent=`$${cost.toFixed(4)} USD`;
+  }catch{}
 }
 
 function sw(name){
