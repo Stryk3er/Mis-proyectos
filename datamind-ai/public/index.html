@@ -196,6 +196,35 @@
     #toast.s{background:rgba(16,185,129,.92);color:#fff} #toast.e{background:rgba(244,63,94,.92);color:#fff} #toast.i{background:rgba(99,102,241,.92);color:#fff}
     ::-webkit-scrollbar{width:4px;height:4px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:var(--bds);border-radius:2px}
 
+    /* LOGIN MODAL */
+    .modal-bg{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);
+      display:flex;align-items:center;justify-content:center}
+    .modal-bg.hidden{display:none}
+    .modal{background:var(--bg2);border:1px solid var(--bds);border-radius:18px;padding:36px 32px;width:360px;
+      box-shadow:0 24px 64px rgba(0,0,0,.5);position:relative}
+    .modal-logo{width:52px;height:52px;margin:0 auto 16px;border-radius:13px;
+      background:linear-gradient(135deg,var(--ind),var(--cyn));
+      box-shadow:0 0 22px rgba(99,102,241,.5);display:flex;align-items:center;justify-content:center;font-size:22px}
+    .modal h2{font-size:18px;font-weight:700;text-align:center;margin-bottom:4px}
+    .modal p{font-size:12px;color:var(--txt2);text-align:center;margin-bottom:22px}
+    .field{margin-bottom:14px}
+    .field label{display:block;font-size:11px;font-weight:600;color:var(--txt2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
+    .field input{width:100%;background:var(--bg3);border:1px solid var(--bd);color:var(--txt);padding:10px 13px;
+      border-radius:9px;font-size:13px;outline:none;transition:border-color .2s}
+    .field input:focus{border-color:var(--ind)}
+    .login-err{font-size:12px;color:var(--red);margin-bottom:10px;min-height:18px;text-align:center}
+    .btn-login{width:100%;padding:11px;background:linear-gradient(135deg,var(--ind),var(--pur));
+      color:#fff;border:none;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity .2s}
+    .btn-login:hover:not(:disabled){opacity:.88}
+    .btn-login:disabled{opacity:.45;cursor:not-allowed}
+    /* USER CHIP */
+    .user-chip{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;
+      font-size:11px;font-weight:600;background:rgba(99,102,241,.1);border:1px solid var(--bds);color:var(--ind)}
+    .btn-logout{background:transparent;color:var(--txt3);border:1px solid var(--bd);padding:5px 10px;
+      border-radius:20px;font-size:11px;cursor:pointer;transition:all .2s}
+    .btn-logout:hover{border-color:var(--red);color:var(--red)}
+
     @media print {
       body{background:#fff!important;color:#111!important}
       .blob,.nav,.left,.tabs,.a-actions,.qchips,.chat-bar,.chat-msgs,#p-d,#p-c,.btn-g{display:none!important}
@@ -235,6 +264,8 @@
     <div class="cost-chip" id="costChip" style="display:none">
       <span>💰</span><span id="costVal">$0.0000</span>
     </div>
+    <div class="user-chip" id="userChip" style="display:none">👤 <span id="userLbl"></span></div>
+    <button class="btn-logout" id="logoutBtn" style="display:none" onclick="logout()">Salir</button>
   </div>
 </nav>
 
@@ -310,6 +341,19 @@
     </div>
   </section>
 </div>
+<!-- LOGIN MODAL -->
+<div class="modal-bg" id="loginModal">
+  <div class="modal">
+    <div class="modal-logo">🧠</div>
+    <h2>DataMind AI</h2>
+    <p>Inicia sesión para continuar</p>
+    <div class="field"><label>Usuario</label><input type="text" id="loginUser" autocomplete="username" placeholder="admin" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    <div class="field"><label>Contraseña</label><input type="password" id="loginPass" autocomplete="current-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    <div class="login-err" id="loginErr"></div>
+    <button class="btn-login" id="loginBtn" onclick="doLogin()">Iniciar sesión</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -322,16 +366,65 @@ const SAMPLE={name:'reporte_ventas_2024.xlsx',headers:['Mes','Ventas_MXN','Gasto
     ['Sep 2024',1850000,960000,890000,241,87,77],['Oct 2024',2100000,1020000,1080000,289,79,81],
     ['Nov 2024',2350000,1100000,1250000,312,85,82],['Dic 2024',2580000,1180000,1400000,356,94,80]]};
 
-// Health check on load
+// ── AUTH ──────────────────────────────────────────────────────
+function showLogin(msg=''){
+  document.getElementById('loginErr').textContent=msg;
+  document.getElementById('loginModal').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('loginUser').focus(),80);
+}
+function hideLogin(){document.getElementById('loginModal').classList.add('hidden');}
+
+async function doLogin(){
+  const btn=document.getElementById('loginBtn');
+  const user=document.getElementById('loginUser').value.trim();
+  const pass=document.getElementById('loginPass').value;
+  if(!user||!pass){document.getElementById('loginErr').textContent='Completa usuario y contraseña';return;}
+  btn.disabled=true;btn.textContent='Verificando...';
+  try{
+    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass})});
+    const d=await r.json();
+    if(!r.ok){document.getElementById('loginErr').textContent=d.error||'Error de login';return;}
+    hideLogin();
+    document.getElementById('userChip').style.display='flex';
+    document.getElementById('userLbl').textContent=d.username+(d.role==='admin'?' ⚙':'');
+    document.getElementById('logoutBtn').style.display='flex';
+    checkHealth();
+  }catch{document.getElementById('loginErr').textContent='No se pudo conectar al servidor';}
+  finally{btn.disabled=false;btn.textContent='Iniciar sesión';}
+}
+
+async function logout(){
+  await fetch('/api/auth/logout',{method:'POST'}).catch(()=>{});
+  document.getElementById('userChip').style.display='none';
+  document.getElementById('logoutBtn').style.display='none';
+  document.getElementById('costChip').style.display='none';
+  showLogin();
+}
+
+async function initApp(){
+  try{
+    const r=await fetch('/api/auth/me');
+    if(r.ok){
+      const d=await r.json();
+      hideLogin();
+      document.getElementById('userChip').style.display='flex';
+      document.getElementById('userLbl').textContent=d.username+(d.role==='admin'?' ⚙':'');
+      document.getElementById('logoutBtn').style.display='flex';
+      checkHealth();
+    }else{showLogin();}
+  }catch{showLogin('No se pudo conectar al servidor');}
+}
+
 async function checkHealth(){
   try{
     const r=await fetch('/api/health');
+    if(r.status===401){showLogin();return;}
     const d=await r.json();
     if(d.keyConfigured){document.getElementById('dot').className='dot ok';document.getElementById('stxt').textContent='Servidor conectado';}
     else{document.getElementById('dot').className='dot warn';document.getElementById('stxt').textContent='API key no configurada';}
   }catch{document.getElementById('dot').className='dot warn';document.getElementById('stxt').textContent='Servidor no disponible';}
 }
-checkHealth();
+initApp();
 
 const dz=document.getElementById('dz');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over');});
@@ -529,15 +622,18 @@ function removeTyping(id){const e=document.getElementById(id);if(e)e.remove();}
 function hKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}}
 function aH(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,100)+'px';}
 
+// Helper: maneja 401 mostrando login
+async function apiFetch(url,opts={}){
+  const res=await fetch(url,opts);
+  if(res.status===401){showLogin('Sesión expirada. Vuelve a iniciar sesión.');throw new Error('Sesión expirada');}
+  return res;
+}
+
 // Análisis profundo → Sonnet (con caché en servidor)
 async function callAnalyzeAPI(prompt){
-  const res=await fetch('/api/analyze',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({prompt})
-  });
+  const res=await apiFetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})});
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||`HTTP ${res.status}`);}
   const data=await res.json();
-  // Mostrar indicador de caché y costo acumulado
   if(data.fromCache) toast('⚡ Resultado desde caché — $0.0000','i');
   updateCostDisplay();
   return data.content;
@@ -545,10 +641,7 @@ async function callAnalyzeAPI(prompt){
 
 // Chat → Haiku (20x más barato)
 async function callChatAPI(prompt){
-  const res=await fetch('/api/chat',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({prompt})
-  });
+  const res=await apiFetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})});
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||`HTTP ${res.status}`);}
   updateCostDisplay();
   return(await res.json()).content;
@@ -558,6 +651,7 @@ async function callChatAPI(prompt){
 async function updateCostDisplay(){
   try{
     const r=await fetch('/api/health');
+    if(!r.ok)return;
     const d=await r.json();
     const cost=d.usage?.estimatedCostUSD??0;
     const chip=document.getElementById('costChip');

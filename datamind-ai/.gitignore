@@ -5,3 +5,7 @@ node_modules/
 Thumbs.db
 .vscode/
 .idea/
+
+# Datos de usuarios y logs — no subir al repo
+data/
+logs/
