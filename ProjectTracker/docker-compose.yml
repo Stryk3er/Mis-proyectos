@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    container_name: pt_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - db_data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:////app/data/projecttracker.db
+      - SECRET_KEY=${SECRET_KEY:-changeme-in-production}
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: pt_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  db_data:

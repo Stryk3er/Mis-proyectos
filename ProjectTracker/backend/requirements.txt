@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-jose[cryptography]
+bcrypt
+python-multipart
+pydantic[email]
+pydantic-settings
+fpdf2
+pytest
+httpx
