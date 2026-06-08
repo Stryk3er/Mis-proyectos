@@ -26,6 +26,16 @@ Lo que antes tomaba 30-40 minutos de revisión manual se reduce a ejecutar un sc
 
 ---
 
+### 📊 [ProjectTracker](./ProjectTracker/)
+Herramienta de gestión de proyectos self-hostable para equipos que no tienen acceso a Jira, Azure DevOps u otras plataformas SaaS. Permite registrar proyectos, asignar responsables, dar seguimiento al avance y exportar reportes de estatus en PDF — todo desde un dashboard web.
+
+Diseñada para plantas industriales, áreas operativas y PyMEs que necesitan trazabilidad sin depender de licencias externas.
+
+**Stack:** Python · FastAPI · Vue 3 · Tailwind CSS · SQLite · Docker  
+**Características:** Auth JWT, CRUD completo, KPIs en tiempo real, filtros por área/estatus/prioridad, exportación PDF, 22 tests automatizados, CI/CD con GitHub Actions
+
+---
+
 ### 🔐 [Mini-SIEM](./mini-siem/)
 Sistema de gestión de eventos de seguridad que recolecta logs del Event Log de Windows, detecta patrones de ataque (fuerza bruta, escalación de privilegios, persistencia) y los muestra en un dashboard web en tiempo real.
 
@@ -39,10 +49,11 @@ Sistema de gestión de eventos de seguridad que recolecta logs del Event Log de 
 | Área | Herramientas |
 |---|---|
 | IA / LLMs | Anthropic Claude (Sonnet, Haiku), prompt engineering, agentes |
-| Backend | Node.js, Express, Python, Flask |
+| Backend | Node.js, Express, Python, Flask, FastAPI |
+| Frontend | Vue 3, Tailwind CSS, Pinia, Vue Router |
 | Seguridad | JWT, bcrypt, audit logging, rate limiting, detección de amenazas |
 | Datos | SheetJS, SQLite, Chart.js, análisis estadístico |
-| DevOps | Docker, Git, variables de entorno, CI/CD básico |
+| DevOps | Docker, Git, GitHub Actions, CI/CD |
 
 ---
 
